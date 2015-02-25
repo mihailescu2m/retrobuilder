@@ -1,0 +1,155 @@
+#!/bin/bash
+
+required_deps_ubuntu="build-essential autogen automake cmake git util-linux libsdl2-dev libtool pkg-config libasound2-dev"
+required_deps_debian="build-essential autogen automake cmake git util-linux libsdl2-dev libtool pkg-config libasound2-dev"
+# add required_deps for distribtion here
+
+set -e
+
+module_deps () {
+    local required_deps="required_deps_$os"
+    # change platform_deps here
+    echo "mali-fbdev ${!required_deps}"
+}
+
+check_deps () {
+    local install=()
+    for pkg in $(module_deps); do
+        has_dep "$pkg" || install+=("$pkg")
+    done
+    if [[ ${#install[@]} -ne 0 ]]; then
+        echo -e "${Blue}Installing required packages${IBlue} ${install[@]} ${Color_Off}"
+        case $os in
+            ubuntu) ;&
+            debian)
+                sudo apt-get install -y --no-install-recommends ${install[@]}
+                ;;
+            # add install method for distribution here
+            *)  ;;
+        esac
+    fi
+    local failed=()
+    for pkg in $deps; do
+        has_dep "$pkg" || failed+=("$pkg")
+    done
+    return ${#failed[@]}
+}
+
+has_dep () {
+    case $os in
+        ubuntu) ;&
+        debian)
+            if [[ "" == "$(dpkg-query -W --showformat='${Status}\n' $1 2>/dev/null|grep "install ok installed")" ]]; then
+                return 1
+            else
+                return 0
+            fi
+            ;;
+        # add dep_check for distribution here
+        *)  ;;
+    esac
+}
+
+swap () {
+    local swapfile="/tmp/swap"
+    local cmd=$1
+    echo swap $cmd
+    case $cmd in
+        on)
+            swap off
+            fallocate -l 512M "$swapfile"
+            mkswap "$swapfile"
+            sudo swapon "$swapfile"
+            have_swap=1
+            echo -e "${Cyan}swap is on${Color_Off}"
+            ;;
+        off)
+            if [[ -f $swapfile && $have_swap -eq 1 ]]; then
+                sudo swapoff "$swapfile"
+                rm -rf "$swapfile"
+                have_swap=0
+                echo -e "${Cyan}swap is off${Color_Off}"
+            fi
+            ;;
+    esac
+}
+
+patch () {
+    # module has no patch
+    return 0
+}
+
+fetch () {
+    echo -e "${Red}ERROR: No ${Yellow}fetch${Red} function found. ${Color_Off}"
+    return -1
+}
+
+build () {
+    echo -e "${Red}ERROR: No ${Green}build${Red} function found. ${Color_Off}"
+    return -1
+}
+
+install () {
+    # module has no install
+    return 0
+}
+
+uninstall () {
+    # module has no uninstall
+    return 0
+}
+
+configure () {
+    # module has no configure
+    return 0
+}
+
+##############################################################
+
+os=`cat /etc/*-release | grep "^ID=" | awk -F "=" {'print $2'}`
+hardware=`cat /proc/cpuinfo | grep Hardware | awk '{print $3}'`
+
+file=$1
+module="$(basename ${file%.*})"
+operation=$2
+folder_current="$(pwd)"
+folder_target="$(cd "$(dirname "$0")" && pwd)"
+folder_module="$folder_target/$module"
+folder=$folder_module
+
+if [[ -z "$operation" ]]; then
+    operation=everything
+fi
+
+check_deps
+
+mkdir -p $folder_target/logs/$module
+exec > >(tee $folder_target/logs/$module/${operation}_$(date +"%Y%m%d-%H%M%S").log) 2>&1
+
+. $folder_target/colors.inc
+. $file
+
+case $operation in
+    remove)
+        uninstall
+        echo -e "${Red}Removing ${IRed}$folder${BRed}... ${Color_Off}"
+        rm -rf $folder
+        rm -rf $folder_target/logs/$module
+        ;;
+    everything)
+        check_deps
+        fetch
+        build
+        install
+        configure
+        ;;
+    build)
+        check_deps
+        ;&
+    *)
+        $operation
+        ;;
+esac
+
+cd $folder_current
+
